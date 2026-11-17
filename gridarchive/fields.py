@@ -29,6 +29,11 @@ def put_field(store, request, grid, values):
 def read_field(store, version):
     identity(version)
     row = store.db.execute("SELECT grid,body FROM fields WHERE id=?", (version,)).fetchone()
+    if row is None and store.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_fields'"
+    ).fetchone():
+        row = store.db.execute(
+            "SELECT grid,body FROM v2_fields WHERE id=?", (version,)).fetchone()
     if row is None:
         raise NotFound("field version")
     return {"id": version, "grid": row["grid"],

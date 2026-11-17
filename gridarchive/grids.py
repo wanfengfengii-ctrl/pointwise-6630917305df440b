@@ -69,6 +69,17 @@ def publish_grid(store, grid_name, request, cells):
 
 def head(store, grid_name):
     name(grid_name)
+    has_v2 = bool(store.db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_heads'"
+    ).fetchone())
+    # On a version-2 store the v2 head is authoritative for new revisions; the
+    # legacy heads table is retained only as read-only audit history.
+    if has_v2:
+        row = store.db.execute(
+            "SELECT revision FROM v2_heads WHERE name=?",
+            (grid_name,)).fetchone()
+        if row is not None:
+            return row["revision"]
     row = store.db.execute("SELECT revision FROM heads WHERE name=?", (grid_name,)).fetchone()
     if row is None:
         raise NotFound("grid name")
@@ -79,10 +90,39 @@ def read_grid(store, revision):
     identity(revision)
     row = store.db.execute("SELECT name,body FROM grids WHERE id=?", (revision,)).fetchone()
     if row is None:
-        raise NotFound("grid revision")
+        # Version-2 native revisions live only in v2_grids; reconstruct the
+        # legacy cells/raw shape from the stored convex pieces so the old read
+        # interface keeps working over the new representation.
+        return _read_v2_grid(store, revision)
     raw = json.loads(row["body"])
     cells = {cell: [[tuple(rational(v) for v in point) for point in ring]
                     for ring in rings] for cell, rings in raw.items()}
+    return {"id": revision, "name": row["name"], "cells": cells, "raw": raw}
+
+
+def _read_v2_grid(store, revision):
+    from .v2_archive import _load_polygon
+    if not store.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_grids'"
+    ).fetchone():
+        raise NotFound("grid revision")
+    row = store.db.execute(
+        "SELECT name,body FROM v2_grids WHERE id=?", (revision,)).fetchone()
+    if row is None:
+        raise NotFound("grid revision")
+    piece_rows = store.db.execute(
+        "SELECT cell_key,body FROM v2_pieces WHERE grid_id=?"
+        " ORDER BY cell_key,ordinal", (revision,)).fetchall()
+    cells = {}
+    raw = {}
+    for cell_key, body in piece_rows:
+        polygon = _load_polygon(body)
+        ring = [list(vertex) for vertex in polygon.vertices]
+        ring.append(ring[0])  # closed walk, str(Fraction) coordinates
+        cells.setdefault(cell_key, []).append(
+            [[str(v) for v in point] for point in ring])
+        raw.setdefault(cell_key, []).append(
+            [[str(v) for v in point] for point in ring])
     return {"id": revision, "name": row["name"], "cells": cells, "raw": raw}
 
 

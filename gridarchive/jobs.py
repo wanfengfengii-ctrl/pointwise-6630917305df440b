@@ -28,9 +28,29 @@ def read_result(store, job):
     row = store.db.execute(
         "SELECT j.*, r.body AS result_body FROM jobs j LEFT JOIN results r ON r.id=j.result WHERE j.id=?",
         (job,)).fetchone()
+    if row is None and store.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_jobs'"
+    ).fetchone():
+        return _read_v2_result(store, job)
     if row is None:
         raise NotFound("job")
     return {"job": {"id": row["id"], "name": row["name"], "source": row["source"],
                     "target": row["target"], "field": row["field"]},
             "result_id": row["result"],
             "result": None if row["result_body"] is None else unpack(json.loads(row["result_body"]))}
+
+
+def _read_v2_result(store, job):
+    from .v2_remap import _result_unpack
+    row = store.db.execute(
+        "SELECT j.*, r.body AS result_body FROM v2_jobs j"
+        " LEFT JOIN v2_results r ON r.id=j.result"
+        " WHERE j.id=? OR j.name=?", (job, job)).fetchone()
+    if row is None:
+        raise NotFound("job")
+    return {"job": {"id": row["id"], "name": row["name"],
+                    "source": row["source"], "target": row["target"],
+                    "field": row["field"]},
+            "result_id": row["result"],
+            "result": None if row["result_body"] is None
+            else _result_unpack(row["result_body"])}

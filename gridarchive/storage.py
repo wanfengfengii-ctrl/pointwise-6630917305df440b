@@ -38,7 +38,9 @@ class Store:
         self.db.execute("PRAGMA foreign_keys=ON")
         try:
             self.db.executescript(SCHEMA)
-            if self.db.execute("SELECT value FROM metadata WHERE key='version'").fetchone()[0] != "1":
+            version = self.db.execute(
+                "SELECT value FROM metadata WHERE key='version'").fetchone()[0]
+            if version not in ("1", "2"):
                 raise ValidationError("unsupported archive version")
         except BaseException:
             self.db.close()
